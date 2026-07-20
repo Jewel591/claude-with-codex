@@ -121,7 +121,9 @@ cmd_ensure() {
 cmd_send() {
   local pane="${1:-}"; shift || die "send: pane id required"
   local msg="$*"
-  [ -n "$pane" ] && [ -n "$msg" ] || die "send: usage: send <pane> <message>"
+  if [ -z "$pane" ] || [ -z "$msg" ]; then
+    die "send: usage: send <pane> <message>"
+  fi
   pane_alive "$pane" || die "send: pane $pane not found"
 
   # Record a baseline so `wait` can require the screen to have moved past it.
