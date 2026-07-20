@@ -1,0 +1,25 @@
+name: Bug report
+description: Something in the skills or scripts doesn't work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Paste the output of `./scripts/check-env.sh`, plus your OS and `tmux -V` / `codex --version` if not covered.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Pane capture / logs
+      description: If a pane misbehaved, attach `tmux capture-pane -p -S -200` output (redact anything sensitive).
+      render: text

@@ -1,0 +1,77 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: |
+          bash -n scripts/check-env.sh
+          bash -n skills/using-codex-collaboration/scripts/codex-pane.sh
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck scripts/check-env.sh skills/using-codex-collaboration/scripts/codex-pane.sh
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skill frontmatter matches directory names
+        run: |
+          for d in skills/*/; do
+            name=$(basename "$d")
+            fm=$(awk -F': *' '/^name:/{print $2; exit}' "$d/SKILL.md")
+            if [ "$name" != "$fm" ]; then
+              echo "::error::$d SKILL.md frontmatter name '$fm' != directory '$name'"; exit 1
+            fi
+            awk 'NR==1 && $0!="---"{exit 1}' "$d/SKILL.md" || { echo "::error::$d/SKILL.md missing frontmatter"; exit 1; }
+          done
+      - name: Local markdown links resolve
+        run: |
+          python3 - <<'EOF'
+          import pathlib, re, sys
+          fail = 0
+          for md in pathlib.Path('.').rglob('*.md'):
+              if '.git' in md.parts:
+                  continue
+              for link in re.findall(r'\]\(([^)]+)\)', md.read_text(encoding='utf-8')):
+                  target = link.split('#')[0].strip()
+                  if not target or target.startswith(('http', 'mailto:')):
+                      continue
+                  if not (md.parent / target).exists():
+                      print(f"::error::{md} → broken link: {link}")
+                      fail = 1
+          sys.exit(fail)
+          EOF
+
+  tmux-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Helper smoke test against a mock TUI (isolated tmux server)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq tmux
+          H=skills/using-codex-collaboration/scripts/codex-pane.sh
+          export TMUX_TMPDIR=$(mktemp -d)
+          # Mock pane that mimics the Codex TUI idle composer
+          tmux new-session -d -s codex-collab -n mock -x 200 -y 50 \
+            "printf 'OpenAI Codex (mock)\nContext 100%% left\n› \n'; sleep 120"
+          PANE=$(tmux list-panes -st codex-collab -F '#{pane_id}' | head -1)
+          tmux set-option -pt "$PANE" @cwc_role codex
+          tmux set-option -pt "$PANE" @cwc_repo "$PWD"
+          # ensure must find the tagged pane instead of launching a new one
+          FOUND=$(bash "$H" ensure --repo "$PWD")
+          [ "$FOUND" = "$PANE" ] || { echo "ensure found $FOUND, expected $PANE"; exit 1; }
+          # capture must return the mock screen
+          bash "$H" capture "$PANE" --lines 50 | grep -q 'Codex (mock)'
+          # cleanup must refuse panes it didn't launch
+          if bash "$H" cleanup "$PANE" 2>/dev/null; then
+            echo "cleanup killed a pane it didn't launch"; exit 1
+          fi
+          tmux kill-server
